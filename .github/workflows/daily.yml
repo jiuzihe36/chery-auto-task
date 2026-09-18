@@ -6,6 +6,10 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:  # 允许手动点一下立即跑一次
 
+env:
+  BILI_KEYWORD: "奇瑞瑞虎8改装"
+  BILI_MAX: "6"
+
 jobs:
   daily:
     runs-on: ubuntu-latest
@@ -18,7 +22,13 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install pycryptodome imageio-ffmpeg
+        run: pip install pycryptodome imageio-ffmpeg bilibili-api-client requests
+
+      - name: Download videos
+        run: python src/video_downloader.py --download-only
+
+      - name: Make daily videos
+        run: python src/video_maker.py
 
       - name: Run daily tasks
         env:

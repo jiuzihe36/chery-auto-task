@@ -74,11 +74,11 @@ def make_daily_videos(raw_dir=RAW_DIR, out_dir=OUT_DIR, count=DAILY_COUNT):
     # 按日期轮选, 避免连续几天发同一组合
     day_idx = datetime.date.today().toordinal()
     outs = []
-    for i in range(min(count, len(raws) * 2)):
+    for i in range(min(count, len(raws))):
         src = raws[(day_idx + i) % len(raws)]
         out = os.path.join(
-            out_dir, "chery_%s_%d.mp4"
-            % (datetime.date.today().strftime("%Y%m%d"), i + 1))
+            os.path.dirname(__file__), "..", "videos", "out",
+            "chery_%s_%d.mp4" % (datetime.date.today().strftime("%Y%m%d"), i + 1))
         try:
             cut_clip(ff, src, out, seed=day_idx + i)
             outs.append(out)

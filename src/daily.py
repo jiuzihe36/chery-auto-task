@@ -410,6 +410,7 @@ def main():
     # 发视频：从社区广场搬运别人视频→二次剪辑→发布（不删除，删了扣分）
     ok, msg = do_repost_videos(token)
     log("%s 发视频: %s" % ("OK" if ok else "FAIL", msg))
+    log("全部完成")
 
     _, after = get_info(token)
     log("之前 %s → 现在 %s（变化 %+d）"
