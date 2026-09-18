@@ -17,8 +17,13 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install deps
+        run: pip install pycryptodome imageio-ffmpeg
+
+      - name: Make videos
+        run: python src/video_maker.py
+
       - name: Run daily tasks
         env:
-          CHERY_PHONE: ${{ secrets.CHERY_PHONE }}
-          CHERY_PASSWORD: ${{ secrets.CHERY_PASSWORD }}
-        run: python src/tasks.py
+          CHERY_TOKEN: ${{ secrets.CHERY_TOKEN }}
+        run: python src/daily.py
