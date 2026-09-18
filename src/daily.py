@@ -3,11 +3,16 @@
 """奇瑞汽车App 每日积分自动化（短信登录 + 每日任务）。
 
 任务链（全部经真实接口验证）：
-  登录（短信验证码，token 有效期约2年）→ 签到 SJ10002 → 分享×2+领奖 SJ10003
-  → 发视频帖×2（OSS直传+发布）→ 删测试帖 → 查积分打卡
+  token 登录（有效期约2年）→ 签到 SJ10002 → 分享×2+领奖 SJ10003
+  → 搬运发视频×2（从社区扒别人视频→二次剪辑→OSS直传→发布，不删除）
+  → 查积分打卡
+
+搬运策略：每天从社区广场扒最新视频帖（排除自己发过的），下载后二次剪辑
+（去头去尾、转竖屏720x1280、压日期标题），已搬运的 source_id 记入 posted.json，
+同一原帖不重复搬。搬运视频与原帖内容相同但文件不同（重编码），属二次剪辑。
 
 借鉴：旧仓库 jiuzihe36/chery/chery_sign.py 的 APP_HEADERS/terminal=3/event/trigger
-由 Hermes Agent 按新任务中心规则（8日常任务）重写，发视频链路为本次新增。
+由 Hermes Agent 按新任务中心规则（8日常任务）重写，搬运链路为本次新增。
 """
 import base64
 import gzip
@@ -33,6 +38,7 @@ APP_HEADERS = {
     "accept": "application/json, text/plain, */*",
     "appversion": "3.6.9",
     "accept-language": "zh-CN,zh;q=0.9",
+    # 注：不要加 accept-encoding: gzip，网关 gzip+加密体会截断 policy 等长字段
     "content-type": "application/json; charset=UTF-8",
     "agent": "android",
     "encryptflag": "true",
@@ -64,8 +70,7 @@ def api(method, url, body=None, headers=None):
                                  data=body, method=method)
     with urllib.request.urlopen(req, timeout=30) as r:
         raw = r.read()
-        if r.headers.get("Content-Encoding") == "gzip":
-            raw = gzip.decompress(raw)
+        # 服务端长字段(JSON)在gzip下会被网关截断，统一按明文解析
         return json.loads(raw)
 
 
@@ -160,31 +165,49 @@ def do_share(token, times=2):
     return ok > 0, "分享成功%d/%d次" % (ok, times)
 
 
-def oss_upload(token, mp4_bytes, suffix="mp4"):
-    sts = enc_get("/web/community/common/sts/signature",
-                  token)["data"]
-    fname = "chery-prod/mobile/community/6000000001112452/%d.%s" % (
-        int(time.time() * 1000), suffix)
-    boundary = "----CheryB%s" % secrets.token_hex(4)
-    fields = {"key": fname, "policy": sts["policy"],
-              "OSSAccessKeyId": sts["accessId"],
-              "signature": sts["signature"],
-              "success_action_status": "200"}
-    body = b""
-    for k, v in fields.items():
-        body += ("--%s\r\nContent-Disposition: form-data; "
-                 "name=\"%s\"\r\n\r\n%s\r\n" % (boundary, k, v)).encode()
-    body += ("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
-             "filename=\"v.%s\"\r\nContent-Type: video/mp4\r\n\r\n"
-             % (boundary, suffix)).encode() + mp4_bytes
-    body += ("--%s--\r\n" % boundary).encode()
-    req = urllib.request.Request(
-        "https://%s.%s" % (sts["bucket"], sts["endpoint"]),
-        data=body, method="POST",
-        headers={"Content-Type": "multipart/form-data; boundary=" + boundary})
-    with urllib.request.urlopen(req, timeout=120) as r:
-        assert r.status == 200
-    return "https://img.chery.cn/" + fname
+def oss_upload(token, mp4_bytes, suffix="mp4", tries=5):
+    import time as _t
+    import http.client as _hc
+    last = None
+    for i in range(tries):  # STS 签名有时效，失败就取新签名重试
+        try:
+            sts = enc_get("/web/community/common/sts/signature",
+                          token)["data"]
+            fname = "chery-prod/mobile/community/6000000001112452/%d_%d.%s" % (
+                int(_t.time() * 1000), i, suffix)
+            boundary = "----CheryB%s" % secrets.token_hex(4)
+            fields = {"key": fname, "policy": sts["policy"],
+                      "OSSAccessKeyId": sts["accessId"],
+                      "signature": sts["signature"],
+                      "success_action_status": "200"}
+            parts = []
+            for k, v in fields.items():
+                parts.append(
+                    ("--%s\r\nContent-Disposition: form-data; name=\"%s\"\r\n\r\n%s\r\n"
+                     % (boundary, k, v)).encode())
+            parts.append(
+                ("--%s\r\nContent-Disposition: form-data; name=\"file\"; "
+                 "filename=\"v.%s\"\r\nContent-Type: video/mp4\r\n\r\n"
+                 % (boundary, suffix)).encode() + mp4_bytes)
+            # multipart 规范: 最后 boundary 前必须 CRLF(OSS 严格,缺了报 Malformed)
+            parts.append(("\r\n--%s--\r\n" % boundary).encode())
+            body = b"".join(parts)
+            host = "%s.%s" % (sts["bucket"], sts["endpoint"])
+            conn = _hc.HTTPSConnection(host, timeout=180)
+            conn.request("POST", "/", body=body,
+                         headers={"Content-Type":
+                                  "multipart/form-data; boundary=" + boundary,
+                                  "Content-Length": str(len(body))})
+            r = conn.getresponse()
+            rb = r.read()
+            conn.close()
+            if r.status == 200:
+                return "https://img.chery.cn/" + fname
+            raise RuntimeError("OSS %s: %s" % (r.status, rb[:200]))
+        except Exception as e:
+            last = e
+            _t.sleep(1 + i * 2)  # 指数退避
+    raise last
 
 
 def publish_video(token, video_url, title, detail, duration=5):
@@ -201,6 +224,165 @@ def delete_post(token, post_id):
     req = urllib.request.Request(url, headers=APP_HEADERS, method="DELETE")
     with urllib.request.urlopen(req, timeout=20) as r:
         return json.loads(r.read())
+
+
+MY_ACCOUNT_ID = "6000000001112452"
+POSTED_PATH = os.path.join(os.path.dirname(__file__), "..", "videos",
+                           "posted.json")
+
+
+def load_posted():
+    try:
+        with open(POSTED_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {"source_ids": [], "posts": []}
+
+
+def save_posted(data):
+    os.makedirs(os.path.dirname(POSTED_PATH), exist_ok=True)
+    with open(POSTED_PATH, "w") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+
+
+def square_videos(token, page_size=30):
+    """从社区广场拉最新视频帖（排除自己发的）。"""
+    q = urllib.parse.quote(aes_encrypt(
+        "pageNo=1&pageSize=%d&access_token=%s&terminal=3"
+        % (page_size, token)), safe="")
+    url = BASE + "/web/community/contents/square-newest-contents?encryptParam=" + q
+    d = api("GET", url)
+    out = []
+    for c in (d.get("data") or {}).get("data", []):
+        if c.get("contentType") != 3:
+            continue
+        if not (c.get("video") or {}).get("url"):
+            continue
+        if str(c.get("authorId")) == MY_ACCOUNT_ID:
+            continue
+        if not str(c.get("id", "")).isdigit():
+            continue
+        out.append(c)
+    return out
+
+
+def download_file(url, limit_mb=150, timeout=120):
+    # OSS 的 URL 含未编码特殊字符时先 quote path 部分
+    parts = urllib.parse.urlsplit(url)
+    url = urllib.parse.urlunsplit(
+        (parts.scheme, parts.netloc,
+         urllib.parse.quote(parts.path, safe="/"),
+         parts.query, parts.fragment))
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "Mozilla/5.0",
+                      "Referer": "https://hybrid-sapp.chery.cn/"})
+    buf = b""
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > limit_mb * 1024 * 1024:
+                break
+    return buf
+
+
+def ffmpeg_exe():
+    import shutil
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except ImportError:
+        return None
+
+
+def probe_duration(ff, path):
+    import re
+    import subprocess
+    p = subprocess.run([ff, "-i", path], capture_output=True, text=True,
+                       timeout=30)
+    m = re.search(r"Duration: (\d+):(\d+):([\d.]+)", p.stderr)
+    if not m:
+        return 0
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+
+
+def reedit(ff, src, dst, title):
+    """二次剪辑：去头去尾各3秒，转竖屏720x1280，压日期标题。"""
+    import subprocess
+    dur = probe_duration(ff, src)
+    if dur <= 0:
+        raise RuntimeError("读不到视频时长")
+    start = 3 if dur > 8 else 0
+    length = max(5, min(40, dur - start - (3 if dur > 8 else 0)))
+    vf = ("scale=720:1280:force_original_aspect_ratio=increase,"
+          "crop=720:1280,"
+          "drawtext=text='%s':fontsize=44:fontcolor=white:"
+          "x=(w-text_w)/2:y=80:box=1:boxcolor=black@0.5" % title)
+    subprocess.run(
+        [ff, "-y", "-ss", str(start), "-t", str(length), "-i", src,
+         "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
+         "-c:a", "aac", "-shortest", dst],
+        check=True, capture_output=True, timeout=300)
+    return length
+
+
+def do_repost_videos(token, count=2):
+    """搬运发视频：扒广场视频→二次剪辑→上传→发布（不删除）。返回(成功数, 说明)。"""
+    import tempfile
+    posted = load_posted()
+    done_ids = set(posted.get("source_ids", []))
+    cands = [c for c in square_videos(token) if str(c["id"]) not in done_ids]
+    if not cands:
+        return False, "广场上没有新的可搬运视频"
+    ff = ffmpeg_exe()
+    if not ff:
+        return False, "没找到 ffmpeg"
+    ok = 0
+    for c in cands:
+        if ok >= count:
+            break
+        sid = str(c["id"])
+        try:
+            raw = download_file(c["video"]["url"])
+            # 有些"视频帖"实为 PNG/图片伪装，跳过
+            if raw[:8] == b"\x89PNG\r\n\x1a\n" or raw[:4] in (b"GIF8", b"\xff\xd8\xff"):
+                log("SKIP 原帖%s: 实为图片伪装 (%s)" % (sid, raw[:4]))
+                continue
+            if len(raw) < 100 * 1024:
+                continue
+            with tempfile.TemporaryDirectory() as td:
+                src = os.path.join(td, "src.mp4")
+                dst = os.path.join(td, "out.mp4")
+                with open(src, "wb") as f:
+                    f.write(raw)
+                title = datetime.now().strftime("%m月%d日") + " 车友分享"
+                length = reedit(ff, src, dst, title)
+                with open(dst, "rb") as f:
+                    url = oss_upload(token, f.read())
+            detail = "看到车友「%s」分享不错，转发给大家" % (
+                (c.get("title") or "精彩视频")[:20])
+            d = publish_video(token, url, (c.get("title") or "车友分享")[:25],
+                              detail, duration=int(length))
+            if d.get("status") == 200:
+                ok += 1
+                posted.setdefault("source_ids", []).append(sid)
+                posted.setdefault("posts", []).append(
+                    {"source_id": sid, "post_id": d["data"],
+                     "date": datetime.now().strftime("%Y-%m-%d")})
+                save_posted(posted)
+                log("OK 搬运视频%d: 原帖%s → 新帖%s" % (ok, sid, d["data"]))
+            else:
+                log("FAIL 搬运发布: %s" % d.get("message"))
+        except Exception as e:
+            log("FAIL 搬运原帖%s: %s" % (sid, str(e)[:150]))
+        time.sleep(2)
+    save_posted(posted)
+    return ok > 0, "搬运发视频成功%d/%d条" % (ok, count)
 
 
 def task_status(token):
@@ -225,25 +407,9 @@ def main():
     ok, msg = do_share(token)
     log("%s 分享: %s" % ("OK" if ok else "FAIL", msg))
 
-    # 发视频：从 videos/out 取成品（CI里由 video_maker 生成），发完即删帖也算完成
-    import glob
-    vids = sorted(glob.glob(os.path.join("videos", "out", "*.mp4")))
-    if not vids:
-        log("SKIP 发视频: videos/out 里没有成品（本地先跑 video_maker.py）")
-    for i, v in enumerate(vids[:2]):
-        try:
-            with open(v, "rb") as f:
-                url = oss_upload(token, f.read())
-            title = "奇瑞用车分享 %s(%d)" % (
-                datetime.now().strftime("%m月%d日"), i + 1)
-            d = publish_video(token, url, title, "奇瑞车主日常分享")
-            if d.get("status") == 200:
-                pid = d["data"]
-                log("OK 发视频%d: %s" % (i + 1, pid))
-            else:
-                log("FAIL 发视频%d: %s" % (i + 1, d.get("message")))
-        except Exception as e:
-            log("FAIL 发视频%d: %s" % (i + 1, str(e)[:150]))
+    # 发视频：从社区广场搬运别人视频→二次剪辑→发布（不删除，删了扣分）
+    ok, msg = do_repost_videos(token)
+    log("%s 发视频: %s" % ("OK" if ok else "FAIL", msg))
 
     _, after = get_info(token)
     log("之前 %s → 现在 %s（变化 %+d）"
