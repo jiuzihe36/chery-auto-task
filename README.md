@@ -38,8 +38,8 @@ videos/posted.json       # 已搬运的 source_id(防重复)
 
 ## 3. 维护（只需做一次）
 
-- `CHERY_TOKEN` 已存进仓库 Secrets（Actions 可用）。token 有效期约2年，到期后跑一遍
-  `send_sms → login_by_sms`（daily.py 里有函数）换新 token 再存一次。
+- 取最新 token：打开 https://chery-token.pages.dev/ → 填手机号 → 获取验证码 → 获取 Token → 一键复制，
+  然后去仓库 Settings → Secrets → Actions，把 `CHERY_TOKEN` 更新掉。token 有效期约2年，到期再取一次。
 - 改素材关键词：编辑 `.github/workflows/daily.yml` 里的 `BILI_KEYWORD`。
 - 改每天下载数量：编辑 `BILI_MAX`。
 - 手动跑一次：仓库页 `Actions → 每日积分任务 → Run workflow`。
