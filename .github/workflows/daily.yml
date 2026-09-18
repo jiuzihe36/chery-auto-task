@@ -20,9 +20,6 @@ jobs:
       - name: Install deps
         run: pip install pycryptodome imageio-ffmpeg
 
-      - name: Make videos
-        run: python src/video_maker.py
-
       - name: Run daily tasks
         env:
           CHERY_TOKEN: ${{ secrets.CHERY_TOKEN }}
