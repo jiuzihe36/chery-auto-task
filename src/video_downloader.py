@@ -24,7 +24,10 @@ import urllib.error
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "videos", "raw")
 MAX_VIDEOS = int(os.environ.get("BILI_MAX", "6"))
-KEYWORD = os.environ.get("BILI_KEYWORD", "奇瑞瑞虎8改装")
+# 每天轮换关键词，素材池天天变，避免重复下载同一批视频
+KEYWORDS = ["奇瑞瑞虎8改装", "瑞虎8越野", "瑞虎8试驾", "瑞虎8用车分享"]
+KEYWORD = os.environ.get("BILI_KEYWORD") or KEYWORDS[
+    datetime.date.today().toordinal() % len(KEYWORDS)]
 
 
 def _ffmpeg():
