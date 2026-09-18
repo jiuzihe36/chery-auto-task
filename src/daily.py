@@ -140,7 +140,54 @@ def trigger(token, event_code):
 
 def do_sign(token):
     d = trigger(token, "SJ10002")
-    return d.get("status") == 200, d.get("message", "")
+    ok, msg = d.get("status") == 200, d.get("message", "")
+    if not ok:
+        return False, msg
+    # 查连续签到天数 + 可开礼盒（7/15/30/60/90/180/360/540/720/1000/1365/2000天）
+    try:
+        box = sign_box_status(token)
+        if box.get("opened"):
+            msg += "，开盒: %s" % "、".join(box["opened"])
+        else:
+            msg += "（连续%d天，%s）" % (box.get("days", "?"), box.get("next", ""))
+    except Exception as e:
+        msg += "（查礼盒失败: %s）" % str(e)[:60]
+    return True, msg
+
+
+def sign_box_status(token):
+    """查签到礼盒：返回 {days, opened:[...], next}。可开的自动跳转抽奖页 prizeCode。"""
+    import urllib.parse
+    import urllib.request
+
+    def enc_get_full(path, params):
+        q = "access_token=%s&terminal=3" % token
+        for k, v in params.items():
+            q += "&%s=%s" % (k, v)
+        enc = aes_encrypt(q).replace("+", "-")
+        url = BASE + path + "?encryptParam=" + urllib.parse.quote(enc, safe="")
+        req = urllib.request.Request(url, headers=APP_HEADERS)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read())
+
+    d = enc_get_full("/web/task/record/sign-in/lottery",
+                     {"taskCode": "SignUpLottery03"})["data"]
+    days = d.get("continualDays", 0)
+    opened, nxt = [], ""
+    stages = sorted(e["stage"] for e in d.get("equityList", []))
+    reached = [s for s in stages if s <= days]
+    if reached:
+        last = reached[-1]
+        for e in d["equityList"]:
+            if e["stage"] == last and e.get("prizeCode"):
+                opened.append("第%d天礼盒(prizeCode=%s，去App抽奖页开)"
+                              % (last, e["prizeCode"]))
+    todo = [s for s in stages if s > days]
+    if todo:
+        nxt = "下个礼盒第%d天，还差%d天" % (todo[0], todo[0] - days)
+    else:
+        nxt = "已开完所有礼盒"
+    return {"days": days, "opened": opened, "next": nxt}
 
 
 def do_share(token, times=2):
