@@ -312,7 +312,7 @@ def probe_duration(ff, path):
 
 
 def reedit(ff, src, dst, title):
-    """二次剪辑：去头去尾各3秒，转竖屏720x1280，压日期标题。"""
+    """二次剪辑：去头去尾各3秒，转竖屏720x1280（不压字：CI 无中文字体）。"""
     import subprocess
     dur = probe_duration(ff, src)
     if dur <= 0:
@@ -320,14 +320,14 @@ def reedit(ff, src, dst, title):
     start = 3 if dur > 8 else 0
     length = max(5, min(40, dur - start - (3 if dur > 8 else 0)))
     vf = ("scale=720:1280:force_original_aspect_ratio=increase,"
-          "crop=720:1280,"
-          "drawtext=text='%s':fontsize=44:fontcolor=white:"
-          "x=(w-text_w)/2:y=80:box=1:boxcolor=black@0.5" % title)
-    subprocess.run(
+          "crop=720:1280")
+    p = subprocess.run(
         [ff, "-y", "-ss", str(start), "-t", str(length), "-i", src,
          "-vf", vf, "-c:v", "libx264", "-preset", "veryfast", "-crf", "26",
          "-c:a", "aac", "-shortest", dst],
-        check=True, capture_output=True, timeout=300)
+        capture_output=True, text=True, timeout=300)
+    if p.returncode != 0:
+        raise RuntimeError("ffmpeg失败: %s" % p.stderr[-300:])
     return length
 
 

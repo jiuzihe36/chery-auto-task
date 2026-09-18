@@ -47,16 +47,13 @@ def _duration(ff, path):
 
 
 def cut_clip(ff, src, out_path, seed):
-    """从原片中间偏seed处切 CLIP_SECONDS 秒, 缩成竖屏, 压日期标题。"""
+    """从原片中间偏seed处切 CLIP_SECONDS 秒, 缩成竖屏(不压字：CI 无中文字体)。"""
     dur = _duration(ff, src)
     if dur < CLIP_SECONDS + 10:
         raise RuntimeError("素材太短(%.1fs < %ds)" % (dur, CLIP_SECONDS))
     start = 5 + (seed * 13) % max(1, int(dur) - CLIP_SECONDS - 10)
-    title = datetime.date.today().strftime("%m月%d日") + " 瑞虎8改装分享"
     vf = ("scale=720:1280:force_original_aspect_ratio=increase,"
-          "crop=720:1280,"
-          "drawtext=text='%s':fontsize=44:fontcolor=white:"
-          "x=(w-text_w)/2:y=80:box=1:boxcolor=black@0.5" % title)
+          "crop=720:1280")
     _run([ff, "-y", "-ss", str(start), "-t", str(CLIP_SECONDS),
           "-i", src, "-vf", vf, "-c:a", "aac", "-shortest", out_path])
 
