@@ -12,13 +12,15 @@
 """
 import datetime
 import glob
+import json
 import os
+import re
 import shutil
 import subprocess
-import sys
+import time
 import urllib.request
 import urllib.parse
-import json
+import urllib.error
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), "..", "videos", "raw")
 MAX_VIDEOS = int(os.environ.get("BILI_MAX", "6"))
@@ -102,35 +104,52 @@ def _bilibili_search(keyword, pages=1):
            "search_type=video&keyword=%s&page=%d"
            % (urllib.parse.quote(keyword), pages))
     req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://search.bilibili.com/"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        d = json.loads(r.read())
-    return d.get("data", {}).get("result", []) or []
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://search.bilibili.com/",
+        "Accept-Language": "zh-CN,zh;q=0.9"})
+    for _ in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                d = json.loads(r.read())
+            if d.get("code") == 0:
+                return d.get("data", {}).get("result", []) or []
+        except urllib.error.HTTPError as e:
+            if e.code == 412:
+                time.sleep(2)
+                continue
+            raise
+        time.sleep(1)
+    return []
 
 
 def _bilibili_play_url(bvid):
-    """取视频播放页, 解析 __playinfo__ 拿到实际视频流 URL。"""
-    url = "https://www.bilibili.com/video/" + bvid
-    req = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0",
-        "Referer": url})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        html = r.read().decode("utf-8", errors="ignore")
-    # 解析内嵌 JSON
-    import re
-    m = re.search(r'__playinfo__=(\{.*?\});', html)
-    if not m:
+    """用 B站 API 拿实际播放 URL(无需网页解析)。
+
+    网页 __playinfo__ 已被 B站 移除，改用 pagelist + playurl 接口。
+    """
+    # 1. 拿 cid
+    cid_url = "https://api.bilibili.com/x/player/pagelist?bvid=" + bvid
+    req = urllib.request.Request(cid_url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        d = json.loads(r.read())
+    if not d.get("data"):
         return None
-    info = json.loads(m.group(1))
-    # 优先 1080P
-    dash = info.get("data", {}).get("dash", {})
+    cid = d["data"][0]["cid"]
+    # 2. 拿 playurl
+    u = ("https://api.bilibili.com/x/player/playurl?bvid=%s&cid=%s&qn=80"
+         "&type=&otype=json&fnval=0" % (bvid, cid))
+    req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0",
+                                              "Referer": "https://www.bilibili.com/"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        d = json.loads(r.read())
+    data = d.get("data", {})
+    if "durl" in data and data["durl"]:
+        return data["durl"][0]["url"]
+    dash = data.get("dash", {})
     for v in dash.get("video", []):
-        if v.get("id") == 116 or v.get("id") == 80:
-            return v.get("baseUrl") or v.get("backup_url", [None])[0]
-    for v in dash.get("video", []):
-        if v.get("id") >= 74:
-            return v.get("baseUrl") or v.get("backup_url", [None])[0]
+        if v.get("baseUrl"):
+            return v["baseUrl"]
     return None
 
 
