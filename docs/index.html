@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>奇瑞 Token 获取</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: #f5f5f5; padding: 24px 16px; color: #333; }
+  .card { max-width: 420px; margin: 0 auto; background: #fff; border-radius: 12px;
+          padding: 24px 20px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  h1 { font-size: 18px; text-align: center; margin-bottom: 20px; }
+  label { display: block; font-size: 14px; margin: 12px 0 6px; color: #666; }
+  input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd;
+          border-radius: 8px; outline: none; }
+  input:focus { border-color: #1677ff; }
+  .row { display: flex; gap: 10px; }
+  .row input { flex: 1; }
+  button { padding: 12px 16px; font-size: 15px; border: none; border-radius: 8px;
+           cursor: pointer; white-space: nowrap; }
+  button:disabled { opacity: .5; }
+  .btn-sms { background: #f0f0f0; color: #333; min-width: 110px; }
+  .btn-main { width: 100%; background: #1677ff; color: #fff; margin-top: 16px;
+              font-size: 16px; }
+  .btn-copy { background: #52c41a; color: #fff; margin-top: 10px; width: 100%;
+              font-size: 16px; }
+  .msg { margin-top: 12px; font-size: 14px; min-height: 20px; text-align: center; }
+  .msg.ok { color: #52c41a; }
+  .msg.err { color: #f5222d; }
+  .token-box { margin-top: 12px; display: none; }
+  .token-box textarea { width: 100%; height: 110px; font-size: 12px; padding: 10px;
+    border: 1px solid #ddd; border-radius: 8px; word-break: break-all; resize: none; }
+  .hint { margin-top: 14px; font-size: 12px; color: #999; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🚗 奇瑞 Token 获取</h1>
+  <label>手机号</label>
+  <input id="phone" type="tel" maxlength="11" placeholder="11位手机号" inputmode="numeric">
+  <label>短信验证码</label>
+  <div class="row">
+    <input id="code" type="text" maxlength="6" placeholder="6位验证码" inputmode="numeric">
+    <button class="btn-sms" id="btnSms" onclick="sendSms()">获取验证码</button>
+  </div>
+  <button class="btn-main" id="btnLogin" onclick="doLogin()">获取 Token</button>
+  <div class="msg" id="msg"></div>
+  <div class="token-box" id="tokenBox">
+    <textarea id="token" readonly></textarea>
+    <button class="btn-copy" onclick="copyToken()">📋 一键复制</button>
+  </div>
+  <div class="hint">
+    ① 填手机号点"获取验证码" → ② 手机收短信填进来 → ③ 点"获取 Token" → ④ 一键复制<br>
+    复制后去仓库 Settings → Secrets → Actions，把 CHERY_TOKEN 更新掉。<br>
+    Token 有效期约2年，到期再来取一次。
+  </div>
+</div>
+<script>
+var UAA = "https://uaa2c.chery.cn";
+var cooldown = 0, timer = null;
+
+function setMsg(t, cls) {
+  var m = document.getElementById("msg");
+  m.textContent = t;
+  m.className = "msg " + (cls || "");
+}
+function validPhone(p) { return /^1\d{10}$/.test(p); }
+
+function sendSms() {
+  var phone = document.getElementById("phone").value.trim();
+  if (!validPhone(phone)) { setMsg("手机号不对，检查下", "err"); return; }
+  if (cooldown > 0) return;
+  var btn = document.getElementById("btnSms");
+  btn.disabled = true;
+  setMsg("发送中…");
+  fetch(UAA + "/api/v1/common/mobile/sms?client_id=cherygf", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mobile: phone, template: "login" })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    if (d.status === 200) {
+      setMsg("短信已发送，注意查收", "ok");
+      cooldown = 60;
+      timer = setInterval(function () {
+        cooldown--;
+        if (cooldown <= 0) {
+          clearInterval(timer);
+          btn.disabled = false;
+          btn.textContent = "获取验证码";
+        } else {
+          btn.textContent = cooldown + "s后重发";
+        }
+      }, 1000);
+    } else {
+      setMsg("发送失败：" + (d.message || d.status), "err");
+      btn.disabled = false;
+    }
+  }).catch(function (e) {
+    setMsg("网络错误：" + e.message, "err");
+    btn.disabled = false;
+  });
+}
+
+function doLogin() {
+  var phone = document.getElementById("phone").value.trim();
+  var code = document.getElementById("code").value.trim();
+  if (!validPhone(phone)) { setMsg("手机号不对，检查下", "err"); return; }
+  if (!/^\d{4,6}$/.test(code)) { setMsg("验证码不对，检查下", "err"); return; }
+  var btn = document.getElementById("btnLogin");
+  btn.disabled = true;
+  setMsg("登录中…");
+  document.getElementById("tokenBox").style.display = "none";
+  fetch(UAA + "/api/v1/uaa/mobile/mobile-code-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mobile: phone, verificationCode: code })
+  }).then(function (r) { return r.json(); }).then(function (d) {
+    btn.disabled = false;
+    if (d.status === 200 && d.data && d.data.accessToken) {
+      document.getElementById("token").value = d.data.accessToken;
+      document.getElementById("tokenBox").style.display = "block";
+      setMsg("✅ 获取成功，点下面按钮复制", "ok");
+    } else {
+      setMsg("登录失败：" + (d.message || d.status), "err");
+    }
+  }).catch(function (e) {
+    btn.disabled = false;
+    setMsg("网络错误：" + e.message, "err");
+  });
+}
+
+function copyToken() {
+  var ta = document.getElementById("token");
+  ta.select();
+  ta.setSelectionRange(0, ta.value.length);
+  function done() { setMsg("已复制，去更新 CHERY_TOKEN 吧", "ok"); }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(done, function () {
+      document.execCommand("copy");
+      done();
+    });
+  } else {
+    document.execCommand("copy");
+    done();
+  }
+}
+</script>
+</body>
+</html>
