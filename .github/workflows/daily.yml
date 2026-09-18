@@ -1,0 +1,24 @@
+name: 每日积分任务
+
+on:
+  schedule:
+    # 每天北京时间 08:00 = UTC 00:00
+    - cron: "0 0 * * *"
+  workflow_dispatch:  # 允许手动点一下立即跑一次
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run daily tasks
+        env:
+          CHERY_PHONE: ${{ secrets.CHERY_PHONE }}
+          CHERY_PASSWORD: ${{ secrets.CHERY_PASSWORD }}
+        run: python src/tasks.py
