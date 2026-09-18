@@ -396,21 +396,30 @@ def task_status(token):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--quick-only", action="store_true",
+                        help="只跑签到+分享（快任务优先）")
+    parser.add_argument("--video-only", action="store_true",
+                        help="只跑发视频（慢任务放后）")
+    args = parser.parse_args()
+
     log("奇瑞每日积分任务启动")
     token = get_access_token()
     name, before = get_info(token)
     log("账号: %s 当前积分: %s" % (name, before))
 
-    ok, msg = do_sign(token)
-    log("%s 签到: %s" % ("OK" if ok else "FAIL", msg))
+    if not args.video_only:
+        ok, msg = do_sign(token)
+        log("%s 签到: %s" % ("OK" if ok else "FAIL", msg))
 
-    ok, msg = do_share(token)
-    log("%s 分享: %s" % ("OK" if ok else "FAIL", msg))
+        ok, msg = do_share(token)
+        log("%s 分享: %s" % ("OK" if ok else "FAIL", msg))
 
-    # 发视频：从社区广场搬运别人视频→二次剪辑→发布（不删除，删了扣分）
-    ok, msg = do_repost_videos(token)
-    log("%s 发视频: %s" % ("OK" if ok else "FAIL", msg))
-    log("全部完成")
+    if not args.quick_only:
+        # 发视频：从社区广场搬运别人视频→二次剪辑→发布（不删除，删了扣分）
+        ok, msg = do_repost_videos(token)
+        log("%s 发视频: %s" % ("OK" if ok else "FAIL", msg))
 
     _, after = get_info(token)
     log("之前 %s → 现在 %s（变化 %+d）"

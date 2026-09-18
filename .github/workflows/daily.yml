@@ -24,13 +24,18 @@ jobs:
       - name: Install deps
         run: pip install pycryptodome imageio-ffmpeg requests
 
+      - name: Run sign-in and share
+        env:
+          CHERY_TOKEN: ${{ secrets.CHERY_TOKEN }}
+        run: python src/daily.py --quick-only
+
       - name: Download videos
         run: python src/video_downloader.py --download-only
 
       - name: Make daily videos
         run: python src/video_maker.py
 
-      - name: Run daily tasks
+      - name: Run video tasks
         env:
           CHERY_TOKEN: ${{ secrets.CHERY_TOKEN }}
-        run: python src/daily.py
+        run: python src/daily.py --video-only
