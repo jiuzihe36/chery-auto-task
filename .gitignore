@@ -1,3 +1,6 @@
 videos/out/
 __pycache__/
 *.pyc
+
+# 素材由 CI 每天从 B站 下载，不进仓库
+videos/raw/
