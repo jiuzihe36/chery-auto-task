@@ -5,7 +5,7 @@
   → video_maker.py 混剪 2 条竖屏成品到 videos/out/
   → daily.py 发帖 2 条 → 查积分
 
-依赖（pip install）: pycryptodome imageio-ffmpeg bilibili-api-client requests
+依赖（pip install）: pycryptodome imageio-ffmpeg requests
 
 安全: 搜索关键词和下载量通过环境变量 BILI_KEYWORD / BILI_MAX 控制,
 默认关键词"奇瑞瑞虎8改装", 默认最多下 6 条。

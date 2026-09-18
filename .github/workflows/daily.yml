@@ -22,7 +22,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: pip install pycryptodome imageio-ffmpeg bilibili-api-client requests
+        run: pip install pycryptodome imageio-ffmpeg requests
 
       - name: Download videos
         run: python src/video_downloader.py --download-only
