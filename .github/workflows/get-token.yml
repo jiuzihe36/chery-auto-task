@@ -1,0 +1,32 @@
+name: 获取 Token（短信验证码）
+
+on:
+  workflow_dispatch:  # 手动点两次：第一次空码发短信，第二次填码换 token
+    inputs:
+      phone:
+        description: '手机号（奇瑞App 登录号）'
+        required: true
+      sms_code:
+        description: '短信验证码（第一次空着跑去收短信，第二次填上）'
+        required: false
+        default: ''
+
+jobs:
+  token:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install pycryptodome
+
+      - name: 发短信 / 换 Token
+        env:
+          PHONE: ${{ inputs.phone }}
+          SMS_CODE: ${{ inputs.sms_code }}
+        run: python src/get_token.py
